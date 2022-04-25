@@ -1,0 +1,151 @@
+---
+title: "Lab 2"
+author: "Connor Flynn"
+date: "4/19/2022"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(tidyr) #text analysis in R
+library(lubridate) #working with date data
+library(tidyverse)
+library(tidytext)
+library(here)
+library(LexisNexisTools) #Nexis Uni data wrangling
+library(sentimentr)
+library(readr)
+library(qdapTools)
+library(here)
+library(textdata)
+```
+
+
+```{r, echo=FALSE, include=FALSE}
+my_files <- list.files(pattern = ".docx", path = getwd(),
+                       full.names = TRUE, recursive = TRUE, ignore.case = TRUE)
+
+dat <- lnt_read(my_files) #Object of class 'LNT output'
+```
+
+
+
+
+```{r, echo=FALSE, results='hide'}
+meta_df <- dat@meta
+articles_df <- dat@articles
+paragraphs_df <- dat@paragraphs
+
+dat2<- data_frame(element_id = seq(1:length(meta_df$Headline)), Date = meta_df$Date, Headline = meta_df$Headline)
+
+
+paragraphs_dat <- data_frame(element_id = paragraphs_df$Art_ID, Text  = paragraphs_df$Paragraph)
+
+dat3 <- inner_join(dat2,paragraphs_dat, by = "element_id")
+
+
+mytext <- get_sentences(dat3$Text)
+sent <- sentiment(mytext)
+
+sent_df <- inner_join(dat3, sent, by = "element_id")
+
+sentiment <- sentiment_by(sent_df$Text)
+
+sent_df %>%
+  arrange(sentiment)
+```
+
+
+
+```{r, results='hide'}
+sent_df$polarity <- ifelse(sent_df$sentiment <0, -1, ifelse(sent_df$sentiment > 0, 1, 0))
+```
+
+```{r}
+ggplot(data = sent_df, aes(x = Date, y = polarity)) + 
+  geom_col()
+```
+
+
+```{r}
+sent_new <- sent_df %>% 
+  mutate(sentiment_category = case_when(sentiment > 0 ~ "positive",
+                                        sentiment < 0 ~ "negative",
+                                        sentiment == 0 ~ "neutral")) %>%
+           group_by(Date, sentiment_category) %>% 
+           summarise(headline_count = n()) 
+
+```
+
+
+```{r}
+ggplot(data = sent_new, aes(x = Date, y = headline_count, color = sentiment_category)) +
+  geom_line() +
+  scale_color_manual(values = c("red", "grey", "blue")) +
+  labs(title = "Sentiment Analysis: IPCC Nexis Uni Data",
+       x = "Date",
+       y = "Developed Media Sentiment (No. Headlines)") +
+  theme_classic() +
+  theme(legend.background = element_blank())
+```
+
+
+
+```{r}
+# nrc_sent <- get_sentiments('nrc') #requires downloading a large dataset via prompt
+
+```
+
+
+```{r}
+dat3_clean <- dat3[!grepl("http", dat3$Text),]
+
+patterns1 <- c("n6", "n7", "n8", "n9", "n10")
+dat3_clean <- dat3_clean[!grepl(paste(patterns1, collapse = "|"), dat3_clean$Text),]
+```
+
+```{r}
+nrc_word_counts <- dat3_clean %>%
+  unnest_tokens(output = word, input = Text, token = 'words') %>% 
+  inner_join(get_sentiments("nrc")) %>%
+  count(word, sentiment, Date, sort = TRUE) %>%
+  ungroup()
+```
+
+```{r}
+nrc_word_counts %>%
+  group_by(sentiment) %>%
+  filter(sentiment != "positive" & sentiment != "negative") %>% 
+  slice_max(n, n = 10) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(x = "Contribution to sentiment",
+       y = NULL)
+```
+```{r}
+nrc_word_counts <- nrc_word_counts %>%
+  filter(sentiment != "positive" & sentiment != "negative") %>% 
+  group_by(Date, sentiment)%>% 
+  count(sentiment) %>% 
+  ungroup() %>%
+  group_by(Date) %>% 
+  mutate(total_n = sum(n), percentage = 100*(n/total_n))
+```
+
+```{r}
+ggplot(data = nrc_word_counts, aes(x = Date, y = percentage, color = sentiment)) + 
+  geom_smooth(se = FALSE) + 
+  theme_classic() + 
+  labs(x = "Date", 
+       y = "Percentage of Sentiment", 
+       color = "Sentiment", 
+       title = "Sentiment Analysis of Indigenous Knowledge") 
+```
+
+
+The distribution of emotion words stays relatively constant throughout, however, there is an interesting relationship between the decline of anticipation and the increase of sadness in Spring 2022. The most prominent emotion seems to be trust, which makes intuitive sense. It is also important to see articles highlighting the fear and mistrust regarding the exclusion and lack of appreciation of Indigenous Knoeledge. 
